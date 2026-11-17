@@ -189,7 +189,7 @@ def test_decompse_rxn():
     ac = loadmat('../cache/component_contribution_ac_all.mat')
 
     dg = float(x.T*ac['dG0_cc'] + g.T*ac['dG0_gc'])
-    print dg
+    print(dg)
     # X = np.concatenate((x.T, g.T),1)
 
     # filename = './model/linearReg_ac_all_cc_model.sav'
@@ -213,7 +213,7 @@ def decompose_reaction(reaction,molsigs):
     x_prime = []
     G_prime = []
 
-    for compound_id, coeff in reaction.iteritems():
+    for compound_id, coeff in reaction.items():
         if compound_id in cids:
             i = cids.index(compound_id)
             x[i, 0] = coeff
@@ -283,7 +283,7 @@ def ridge_all_data():
 
     reg = BayesianRidge(tol=1e-6, fit_intercept=False, compute_score=True)
     reg.fit(X,y)
-    print reg.coef_
+    print(reg.coef_)
     # conv = reg.sigma_
     # conv_coeff = [conv[i][i] for i in range(len(conv))]
 
@@ -471,7 +471,7 @@ def change_direction():
     df_dG = pd.read_csv('../cache/db_ac_all/result.csv', index_col='reaction')
     dG = df_dG['dG'].to_dict()
     
-    for rxn,value in dG.iteritems():
+    for rxn,value in dG.items():
         if value > 0:
             df[rxn] = -1*df[rxn]
 
@@ -543,7 +543,7 @@ def get_transform_ddG0(rxn_dict, ccache, pH, I, T):
     """
     
     ddG0_forward = 0
-    for compound_id, coeff in rxn_dict.iteritems():
+    for compound_id, coeff in rxn_dict.items():
         comp = ccache.get_compound(compound_id)
         ddG0_forward += coeff * comp.transform_pH7(pH, I, T)
     return ddG0_forward
@@ -568,8 +568,8 @@ def find_identical_rule():
         if df[col].equals(-df[rule]):
             # print col
             identical_reactions['reverse'].append(col)
-    print identical_reactions
-    print len(identical_reactions['forward']) + len(identical_reactions['reverse'])  
+    print(identical_reactions)
+    print(len(identical_reactions['forward']) + len(identical_reactions['reverse']))  
 
 if __name__ == '__main__':
     # linear_regression_cc()
