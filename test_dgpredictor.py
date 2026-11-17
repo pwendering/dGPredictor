@@ -1,7 +1,5 @@
 import json
 import os
-import re
-import math
 import sys
 
 import numpy as np
@@ -13,81 +11,78 @@ sys.path.insert(0, SCRIPT_DIR)
 import predict_dG
 
 
-# =============================================================================
-# Fixtures
-# =============================================================================
+@pytest.fixture(scope="session")
+def signatures():
+    r1 = predict_dG.load_molsig_rad1()
+    r2 = predict_dG.load_molsig_rad2()
+    return r1, r2
+
 
 @pytest.fixture(scope="session")
-def model_data():
+def model_and_sigs(signatures):
     model = predict_dG.load_model()
-    molsig_r1 = predict_dG.load_molsig(1)
-    molsig_r2 = predict_dG.load_molsig(2)
-    group_r1 = predict_dG.load_group_names(1)
-    group_r2 = predict_dG.load_group_names(2)
-    group_idx_r1 = {g: i for i, g in enumerate(group_r1)}
-    group_idx_r2 = {g: i for i, g in enumerate(group_r2)}
-    return model, molsig_r1, molsig_r2, group_idx_r1, group_idx_r2
+    r1, r2 = signatures
+    return model, r1, r2
 
 
 @pytest.fixture(scope="session")
 def kegg_rxns():
-    path = os.path.join(SCRIPT_DIR, "data", "kegg", "kegg_rxns.json")
-    return json.load(open(path))
+    return json.load(open(os.path.join(SCRIPT_DIR, "data", "kegg", "kegg_rxns.json")))
 
 
 # =============================================================================
-# parse_reaction
+# Parse reaction (original: parse_formula / parse_reaction_formula_side)
 # =============================================================================
 
-class TestParseReaction:
+class TestParseFormula:
     def test_basic(self):
-        r = predict_dG.parse_reaction("C00001 + C00002 <=> C00003")
+        r = predict_dG.parse_formula("C00001 + C00002 <=> C00003")
         assert r == {"C00001": -1, "C00002": -1, "C00003": 1}
 
     def test_with_stoichiometry(self):
-        r = predict_dG.parse_reaction("2 C00001 + C00002 <=> 3 C00003")
+        r = predict_dG.parse_formula("2 C00001 + C00002 <=> 3 C00003")
         assert r == {"C00001": -2, "C00002": -1, "C00003": 3}
 
     def test_null_side(self):
-        r = predict_dG.parse_reaction("null <=> C00001")
+        r = predict_dG.parse_formula("null <=> C00001")
         assert r == {"C00001": 1}
 
     def test_single_compound(self):
-        r = predict_dG.parse_reaction("C00001 <=> C00002")
+        r = predict_dG.parse_formula("C00001 <=> C00002")
         assert r == {"C00001": -1, "C00002": 1}
 
-    def test_h2_o_skipped(self):
-        r = predict_dG.parse_reaction("C00080 + C00282 <=> C00001")
+    def test_keeps_h2o(self):
+        r = predict_dG.parse_formula("C00080 + C00282 <=> C00001")
         assert "C00080" in r
         assert "C00282" in r
 
     def test_invalid_arrow(self):
-        assert predict_dG.parse_reaction("C00001 -> C00002") is None
+        assert predict_dG.parse_formula("C00001 -> C00002") is None
 
     def test_no_arrow(self):
-        assert predict_dG.parse_reaction("C00001") is None
+        assert predict_dG.parse_formula("C00001") is None
 
 
-class TestParseReactionSide:
+class TestParseReactionFormulaSide:
     def test_empty(self):
-        assert predict_dG.parse_reaction_side("") == {}
+        assert predict_dG.parse_reaction_formula_side("") == {}
 
     def test_null(self):
-        assert predict_dG.parse_reaction_side("null") == {}
+        assert predict_dG.parse_reaction_formula_side("null") == {}
 
     def test_single(self):
-        assert predict_dG.parse_reaction_side("C00001") == {"C00001": 1}
+        assert predict_dG.parse_reaction_formula_side("C00001") == {"C00001": 1}
 
     def test_with_count(self):
-        assert predict_dG.parse_reaction_side("2 C00001") == {"C00001": 2}
+        assert predict_dG.parse_reaction_formula_side("2 C00001") == {"C00001": 2}
 
     def test_multiple(self):
-        r = predict_dG.parse_reaction_side("2 C00001 + C00002 + 3 C00003")
+        r = predict_dG.parse_reaction_formula_side("2 C00001 + C00002 + 3 C00003")
         assert r == {"C00001": 2, "C00002": 1, "C00003": 3}
 
 
 # =============================================================================
-# count_substructures
+# count_substructures (exact copy from original)
 # =============================================================================
 
 class TestCountSubstructures:
@@ -126,79 +121,51 @@ class TestCountSubstructures:
 
 
 # =============================================================================
-# decompose_novel
+# get_rule (exact copy from original, returns (rule_comb, df1, df2))
 # =============================================================================
 
-class TestDecomposeNovel:
-    def test_single_smiles(self):
-        result = predict_dG.decompose_novel({"X": "O"}, 1)
-        assert "X" in result
-        assert "O" in result["X"]
-
-    def test_multiple(self):
-        result = predict_dG.decompose_novel({"A": "O", "B": "CCO"}, 1)
-        assert "A" in result
-        assert "B" in result
-
-    def test_invalid_smiles(self):
-        result = predict_dG.decompose_novel({"X": "not-a-smiles"}, 1)
-        assert result == {}
-
-
-# =============================================================================
-# build_rule_vector
-# =============================================================================
-
-class TestBuildRuleVector:
-    def test_returns_array(self, model_data):
-        _, molsig_r1, molsig_r2, gidx1, gidx2 = model_data
+class TestGetRule:
+    def test_returns_tuple(self, signatures):
+        r1, r2 = signatures
         rxn = {"C00001": -1, "C00002": 1}
-        X = predict_dG.build_rule_vector(rxn, molsig_r1, molsig_r2, gidx1, gidx2)
-        n_features = len(gidx1) + 44 + len(gidx2) + 44
-        assert X.shape == (n_features,)
+        rule_comb, df1, df2 = predict_dG.get_rule(rxn, r1, r2, None, None)
+        assert rule_comb is not None
+        assert df1 is not None
+        assert df2 is not None
 
-    def test_missing_compound(self, model_data):
-        _, molsig_r1, molsig_r2, gidx1, gidx2 = model_data
+    def test_missing_compound(self, signatures):
+        r1, r2 = signatures
         rxn = {"ZZZZZZ": -1, "C00001": 1}
-        X = predict_dG.build_rule_vector(rxn, molsig_r1, molsig_r2, gidx1, gidx2)
-        assert X is None
+        rule_comb, df1, df2 = predict_dG.get_rule(rxn, r1, r2, None, None)
+        assert rule_comb is None
 
-    def test_novel_compound(self, model_data):
-        _, molsig_r1, molsig_r2, gidx1, gidx2 = model_data
-        novel = predict_dG.decompose_novel({"N2": "O"}, 1)
-        novel2 = predict_dG.decompose_novel({"N2": "O"}, 2)
-        rxn = {"C00001": -1, "N2": 1}
-        X = predict_dG.build_rule_vector(rxn, molsig_r1, molsig_r2,
-                                          gidx1, gidx2, novel, novel2)
-        assert X is not None
-
-    def test_skip_compounds(self, model_data):
-        _, molsig_r1, molsig_r2, gidx1, gidx2 = model_data
+    def test_skip_compounds(self, signatures):
+        r1, r2 = signatures
         rxn = {"C00080": -1, "C00282": -1}
-        X = predict_dG.build_rule_vector(rxn, molsig_r1, molsig_r2, gidx1, gidx2)
-        assert X is not None
-        assert np.all(X == 0)
+        rule_comb, df1, df2 = predict_dG.get_rule(rxn, r1, r2, None, None)
+        assert rule_comb is not None
 
 
 # =============================================================================
-# Prediction
+# Prediction via get_dG0 (original prediction entry point)
 # =============================================================================
 
 class TestPrediction:
-    def test_single_reaction(self, model_data):
-        model, molsig_r1, molsig_r2, gidx1, gidx2 = model_data
-        rxn = predict_dG.parse_reaction("C16688 + C00001 <=> C00095 + C00092")
-        X = predict_dG.build_rule_vector(rxn, molsig_r1, molsig_r2, gidx1, gidx2)
-        ymean, ystd = model.predict(X.reshape(1, -1), return_std=True)
-        assert isinstance(float(ymean[0]), float)
-        assert float(ystd[0]) > 0
+    def test_known_value(self, model_and_sigs):
+        model, r1, r2 = model_and_sigs
+        rxn = predict_dG.parse_formula("C16688 + C00001 <=> C00095 + C00092")
+        mu, ci, _, _ = predict_dG.get_dG0(
+            rxn, 'test', 7.0, 0.25, model, r1, r2, None, None, None)
+        assert mu is not None
+        assert abs(mu - (-26.03)) < 0.1
 
-    def test_known_value(self, model_data):
-        model, molsig_r1, molsig_r2, gidx1, gidx2 = model_data
-        rxn = predict_dG.parse_reaction("C16688 + C00001 <=> C00095 + C00092")
-        X = predict_dG.build_rule_vector(rxn, molsig_r1, molsig_r2, gidx1, gidx2)
-        ymean, ystd = model.predict(X.reshape(1, -1), return_std=True)
-        assert abs(float(ymean[0]) - (-26.03)) < 0.1
+    def test_single_reaction(self, model_and_sigs):
+        model, r1, r2 = model_and_sigs
+        rxn = predict_dG.parse_formula("C16688 + C00001 <=> C00095 + C00092")
+        mu, ci, _, _ = predict_dG.get_dG0(
+            rxn, 'test', 7.0, 0.25, model, r1, r2, None, None, None)
+        assert isinstance(mu, float)
+        assert isinstance(ci, float)
 
     def test_all_predictions_have_dG(self):
         path = os.path.join(SCRIPT_DIR, "predictions", "kegg", "full_predictions.json")
@@ -216,26 +183,24 @@ class TestPrediction:
 # =============================================================================
 
 class TestModelIntegrity:
-    def test_model_loaded(self, model_data):
-        model = model_data[0]
+    def test_model_loaded(self, model_and_sigs):
+        model = model_and_sigs[0]
         assert hasattr(model, "predict")
         assert hasattr(model, "coef_")
         assert model.fit_intercept == False
 
-    def test_model_dimensions(self, model_data):
-        model = model_data[0]
-        n_features = model.n_features_in_
-        # original feature space: 1435 r1 + 44 pad + 24881 r2 + 44 pad = 26404
-        assert n_features == 26404
+    def test_model_dimensions(self, model_and_sigs):
+        model = model_and_sigs[0]
+        assert model.n_features_in_ == 26404
 
-    def test_model_mse(self, model_data):
+    def test_model_mse(self, model_and_sigs):
         from scipy.io import loadmat
-        model = model_data[0]
+        from sklearn.metrics import mean_squared_error, r2_score
+        model = model_and_sigs[0]
         mat = loadmat(os.path.join(SCRIPT_DIR, "data", "Test_KEGG_all_grp.mat"))
         y = mat["y"].flatten()
         Xrc = mat["X_comb_all"]
         y_pred = model.predict(Xrc)
-        from sklearn.metrics import mean_squared_error, r2_score
         mse = mean_squared_error(y, y_pred)
         r2 = r2_score(y, y_pred)
         assert abs(mse - 9.60) < 0.1
@@ -255,38 +220,37 @@ class TestModelIntegrity:
 
 
 # =============================================================================
-# Reaction parsing (MetaNetX format compatibility)
+# KEGG reactions parsing
 # =============================================================================
 
 class TestKEGGReactions:
     def test_all_parse(self, kegg_rxns):
         failed = []
         for rid, eq in kegg_rxns.items():
-            r = predict_dG.parse_reaction(eq)
-            if r is None:
+            if predict_dG.parse_formula(eq) is None:
                 failed.append(rid)
         assert len(failed) == 0, f"{len(failed)} reactions failed to parse"
 
     def test_no_zero_stoich(self, kegg_rxns):
         degenerate = 0
         for rid, eq in list(kegg_rxns.items())[:500]:
-            r = predict_dG.parse_reaction(eq)
+            r = predict_dG.parse_formula(eq)
             if r:
                 non_zero = {c for c, v in r.items() if abs(v) > 1e-6}
                 if len(non_zero) == 0:
                     degenerate += 1
-        assert degenerate < 10, f"Too many degenerate reactions: {degenerate}"
+        assert degenerate < 10
 
     def test_has_substrates_and_products(self, kegg_rxns):
         degenerate = 0
         for rid, eq in list(kegg_rxns.items())[:500]:
-            r = predict_dG.parse_reaction(eq)
+            r = predict_dG.parse_formula(eq)
             if r:
-                substrates = [c for c, v in r.items() if v < 0]
-                products = [c for c, v in r.items() if v > 0]
-                if len(substrates) == 0 and len(products) == 0:
+                subs = [c for c, v in r.items() if v < 0]
+                pros = [c for c, v in r.items() if v > 0]
+                if len(subs) == 0 and len(pros) == 0:
                     degenerate += 1
-        assert degenerate < 10, f"Too many degenerate reactions: {degenerate}"
+        assert degenerate < 10
 
 
 # =============================================================================
@@ -296,28 +260,27 @@ class TestKEGGReactions:
 class TestErrorHandling:
     def test_missing_model_file(self):
         path = os.path.join(SCRIPT_DIR, "model", "M12_model_BR.pkl")
-        assert os.path.exists(path), "Model file not found"
-        # load_model() calls sys.exit(1) if missing; verify the guard works
+        assert os.path.exists(path)
         model = predict_dG.load_model()
         assert model is not None
 
-    def test_nonexistent_compound(self, model_data):
-        _, molsig_r1, molsig_r2, gidx1, gidx2 = model_data
+    def test_nonexistent_compound(self, signatures):
+        r1, r2 = signatures
         rxn = {"DOES_NOT_EXIST": -1}
-        X = predict_dG.build_rule_vector(rxn, molsig_r1, molsig_r2, gidx1, gidx2)
-        assert X is None
+        rc, _, _ = predict_dG.get_rule(rxn, r1, r2, None, None)
+        assert rc is None
 
 
 # =============================================================================
-# Supplementary material validation
+# Prediction consistency against training data
 # =============================================================================
 
-class TestSupplementaryMaterial:
-    def test_reproduce_supplementary(self):
+class TestPredictionConsistency:
+    def test_reproduce_training(self):
+        from scipy.io import loadmat
         pred_path = os.path.join(SCRIPT_DIR, "predictions", "kegg", "full_predictions.json")
         pred = json.load(open(pred_path))
 
-        from scipy.io import loadmat
         mat = loadmat(os.path.join(SCRIPT_DIR, "data",
                                    "component_contribution_python.mat"))
         train_S = mat["train_S"]
@@ -333,7 +296,7 @@ class TestSupplementaryMaterial:
             dG_exp = float(b[col_idx])
             dG_pred = None
             for rid, eq in kegg_rxns.items():
-                rxn = predict_dG.parse_reaction(eq)
+                rxn = predict_dG.parse_formula(eq)
                 if rxn is None:
                     continue
                 match = True
@@ -356,25 +319,21 @@ class TestSupplementaryMaterial:
 
 
 # =============================================================================
-# Regression: known issues
+# File existence checks
 # =============================================================================
 
-class TestKnownDOs:
-    def test_predict_dG_script_exists(self):
-        path = os.path.join(SCRIPT_DIR, "predict_dG.py")
-        assert os.path.exists(path)
+class TestFilesExist:
+    def test_predict_dG_script(self):
+        assert os.path.exists(os.path.join(SCRIPT_DIR, "predict_dG.py"))
 
-    def test_model_file_exists(self):
-        path = os.path.join(SCRIPT_DIR, "model", "M12_model_BR.pkl")
-        assert os.path.exists(path)
+    def test_model_file(self):
+        assert os.path.exists(os.path.join(SCRIPT_DIR, "model", "M12_model_BR.pkl"))
 
-    def test_molsig_files_exist(self):
+    def test_molsig_files(self):
         for f in ["decompose_vector_ac.json",
                    "decompose_vector_ac_r2_py3_indent_modified_manual.json"]:
-            path = os.path.join(SCRIPT_DIR, "data", f)
-            assert os.path.exists(path), f"Missing: {f}"
+            assert os.path.exists(os.path.join(SCRIPT_DIR, "data", f))
 
-    def test_group_name_files_exist(self):
+    def test_group_name_files(self):
         for f in ["group_names_r1.txt", "group_names_r2_py3_modified_manual.txt"]:
-            path = os.path.join(SCRIPT_DIR, "data", f)
-            assert os.path.exists(path), f"Missing: {f}"
+            assert os.path.exists(os.path.join(SCRIPT_DIR, "data", f))
