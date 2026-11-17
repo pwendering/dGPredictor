@@ -11,10 +11,10 @@ Usage:
         --novel '{"N00001": "Oc1cccc(c1)/C=C/c2ccccc2"}'
 
     # Batch from JSON reaction file
-    python predict_dG.py --file kegg_rxns.json -o predictions.json
+    python predict_dG.py --file data/kegg/kegg_rxns.json -o predictions.json
 
     # Filter to specific reactions
-    python predict_dG.py --file kegg_rxns.json -o predictions.json \
+    python predict_dG.py --file data/kegg/kegg_rxns.json -o predictions.json \
         --rxns R00253 R00256 R00010
 """
 

@@ -31,7 +31,7 @@ def model_data():
 
 @pytest.fixture(scope="session")
 def kegg_rxns():
-    path = os.path.join(SCRIPT_DIR, "kegg_rxns.json")
+    path = os.path.join(SCRIPT_DIR, "data", "kegg", "kegg_rxns.json")
     return json.load(open(path))
 
 
@@ -201,7 +201,7 @@ class TestPrediction:
         assert abs(float(ymean[0]) - (-26.03)) < 0.1
 
     def test_all_predictions_have_dG(self):
-        path = os.path.join(SCRIPT_DIR, "full_predictions.json")
+        path = os.path.join(SCRIPT_DIR, "predictions", "kegg", "full_predictions.json")
         pred = json.load(open(path))
         for rid, entry in pred.items():
             if "error" not in entry:
@@ -314,7 +314,7 @@ class TestErrorHandling:
 
 class TestSupplementaryMaterial:
     def test_reproduce_supplementary(self):
-        pred_path = os.path.join(SCRIPT_DIR, "full_predictions.json")
+        pred_path = os.path.join(SCRIPT_DIR, "predictions", "kegg", "full_predictions.json")
         pred = json.load(open(pred_path))
 
         from scipy.io import loadmat
@@ -325,7 +325,7 @@ class TestSupplementaryMaterial:
         b = mat["b"].flatten()
 
         kegg_rxns = json.load(
-            open(os.path.join(SCRIPT_DIR, "kegg_rxns.json")))
+            open(os.path.join(SCRIPT_DIR, "data", "kegg", "kegg_rxns.json")))
 
         diffs = []
         for col_idx in range(min(train_S.shape[1], 500)):
